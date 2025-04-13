@@ -1,0 +1,8 @@
+services:
+  app:
+    image: ghcr.io/gapidobri/bolha-notifier
+    build: .
+    container_name: bolha-notifier
+    volumes:
+      - ./config.yaml:/etc/bolha-notifier/config.yaml:ro
+    restart: always
