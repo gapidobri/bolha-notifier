@@ -11,7 +11,10 @@ import (
 	"github.com/samber/lo"
 	log "github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
+	"net/url"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,27 +42,37 @@ func Run() {
 		log.WithError(err).Fatal("failed to create webhook client")
 	}
 
-	for _, url := range cfg.Urls {
-		err = prefetch(url)
+	for _, u := range cfg.Urls {
+		err = prefetch(u)
 		if err != nil {
-			log.WithError(err).WithField("url", url).Error("failed to prefetch url")
+			log.WithError(err).WithField("url", u).Error("failed to prefetch url")
 		}
 	}
 
 	log.Infof("watching %d urls", len(cfg.Urls))
 
 	for range time.Tick(time.Duration(cfg.CheckInterval) * time.Second) {
-		log.Info("running check")
-		for _, url := range cfg.Urls {
-			newPosts, err := getNew(url)
+		for _, u := range cfg.Urls {
+			newPosts, err := getNew(u)
 			if err != nil {
 				log.WithError(err).Error("failed to fetch new posts")
 				continue
 			}
 
+			newPosts = lo.Filter(newPosts, func(post types.Post, _ int) bool {
+				for _, word := range cfg.ExcludedWords {
+					if strings.Contains(post.Title, word) {
+						return false
+					}
+				}
+				return true
+			})
+
 			if len(newPosts) == 0 {
 				continue
 			}
+
+			log.Infof("%d new posts found", len(newPosts))
 
 			err = nt.SendPosts(newPosts)
 			if err != nil {
@@ -69,8 +82,16 @@ func Run() {
 	}
 }
 
-func prefetch(url string) error {
-	posts, err := scraper.ParsePage(fmt.Sprintf("%s&sort=new", url))
+func prefetch(rawUrl string) error {
+	u, err := url.Parse(rawUrl)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	query := u.Query()
+	query.Set("sort", "new")
+	u.RawQuery = query.Encode()
+
+	posts, err := scraper.ParsePage(u.String())
 	switch {
 	case err == nil:
 		break
@@ -87,12 +108,22 @@ func prefetch(url string) error {
 	return nil
 }
 
-func getNew(url string) ([]types.Post, error) {
+func getNew(rawUrl string) ([]types.Post, error) {
+	u, err := url.Parse(rawUrl)
+	if err != nil {
+		return nil, fmt.Errorf("invalid url: %w", err)
+	}
+	query := u.Query()
+	query.Set("sort", "new")
+
 	page := 1
 	var newPosts []types.Post
 
 	for {
-		posts, err := scraper.ParsePage(fmt.Sprintf("%s&sort=new&page=%d", url, page))
+		query.Set("page", strconv.Itoa(page))
+		u.RawQuery = query.Encode()
+
+		posts, err := scraper.ParsePage(u.String())
 		switch {
 		case err == nil:
 			break
