@@ -61,7 +61,7 @@ func Run() {
 
 			newPosts = lo.Filter(newPosts, func(post types.Post, _ int) bool {
 				for _, word := range cfg.ExcludedWords {
-					if strings.Contains(post.Title, word) {
+					if strings.Contains(strings.ToLower(post.Title), strings.ToLower(word)) {
 						return false
 					}
 				}
